@@ -1,0 +1,103 @@
+{
+  "name": "@maanasa-marthi/crashpoint-ios",
+  "version": "1.0.0",
+  "description": "Standalone MCP server for iOS/macOS crash log export, symbolication, analysis & CSV reporting.",
+  "scripts": {
+    "build": "tsc --declaration --emitDeclarationOnly --outDir dist && esbuild src/core-server.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/core-server.js --banner:js=\"import { fileURLToPath as _fUTP } from 'url'; import { dirname as _dn } from 'path'; const __dirname = _dn(_fUTP(import.meta.url)); const __filename = _fUTP(import.meta.url);\" --external:fs --external:path --external:os --external:crypto --external:child_process --external:url --external:stream --external:events --external:util --external:net --external:tls --external:http --external:https --external:assert --external:buffer --external:string_decoder --external:readline --external:tty --external:worker_threads --external:module --external:@modelcontextprotocol/sdk --external:zod && esbuild src/cli/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/cli.js --banner:js=\"import { fileURLToPath as _fUTP } from 'url'; import { dirname as _dn } from 'path'; const __dirname = _dn(_fUTP(import.meta.url)); const __filename = _fUTP(import.meta.url);\" --external:fs --external:path --external:os --external:crypto --external:child_process --external:url --external:stream --external:events --external:util --external:net --external:tls --external:http --external:https --external:assert --external:buffer --external:string_decoder --external:readline --external:tty --external:worker_threads --external:module --external:@modelcontextprotocol/sdk --external:zod && esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/index.js --banner:js=\"import { fileURLToPath as _fUTP } from 'url'; import { dirname as _dn } from 'path'; const __dirname = _dn(_fUTP(import.meta.url)); const __filename = _fUTP(import.meta.url);\" --external:fs --external:path --external:os --external:crypto --external:child_process --external:url --external:stream --external:events --external:util --external:net --external:tls --external:http --external:https --external:assert --external:buffer --external:string_decoder --external:readline --external:tty --external:worker_threads --external:module --external:@modelcontextprotocol/sdk --external:zod",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./core/crashAnalyzer": {
+      "types": "./dist/core/crashAnalyzer.d.ts",
+      "import": "./dist/core/crashAnalyzer.js"
+    },
+    "./core/crashExporter": {
+      "types": "./dist/core/crashExporter.d.ts",
+      "import": "./dist/core/crashExporter.js"
+    },
+    "./core/symbolicator": {
+      "types": "./dist/core/symbolicator.d.ts",
+      "import": "./dist/core/symbolicator.js"
+    },
+    "./core/csvExporter": {
+      "types": "./dist/core/csvExporter.d.ts",
+      "import": "./dist/core/csvExporter.js"
+    },
+    "./core/setup": {
+      "types": "./dist/core/setup.d.ts",
+      "import": "./dist/core/setup.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    },
+    "./state/fixTracker": {
+      "types": "./dist/state/fixTracker.d.ts",
+      "import": "./dist/state/fixTracker.js"
+    },
+    "./state/processedManifest": {
+      "types": "./dist/state/processedManifest.d.ts",
+      "import": "./dist/state/processedManifest.js"
+    },
+    "./state": {
+      "types": "./dist/state/index.d.ts",
+      "import": "./dist/state/index.js"
+    },
+    "./pathSafety": {
+      "types": "./dist/pathSafety.d.ts",
+      "import": "./dist/pathSafety.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "automation/"
+  ],
+  "bin": {
+    "crashpoint-ios-core": "dist/core-server.js",
+    "crashpoint-ios-cli": "dist/cli.js"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maanasa-marthi/CrashPoint-IOS.git"
+  },
+  "keywords": [
+    "iOS",
+    "macOS",
+    "crash",
+    "symbolication",
+    "atos",
+    "MCP",
+    "Xcode"
+  ],
+  "author": "maanasa-marthi",
+  "bugs": {
+    "url": "https://github.com/maanasa-marthi/CrashPoint-IOS/issues"
+  },
+  "homepage": "https://github.com/maanasa-marthi/CrashPoint-IOS#readme",
+  "overrides": {
+    "hono": ">=4.12.14"
+  }
+}

@@ -1,0 +1,287 @@
+import fs from "fs";
+import path from "path";
+import { ProcessedManifest, extractIncidentId } from "../state/processedManifest.js";
+import { validateDateInput } from "../dateValidation.js";
+
+export interface ExportEntry {
+  source: string;
+  destination: string;
+  version: string;
+  skipped: boolean;
+  reason?: string;
+}
+
+export interface ExportResult {
+  canBeExported?: number;
+  exported: number;
+  skipped: number;
+  errors: string[];
+  files: ExportEntry[];
+}
+
+const VERSION_REGEX = /^Version:\s+(.+)/;
+const SHORT_VERSION_REGEX = /^(.+?)\s+\((\d+)\)$/;
+const DATE_TIME_REGEX = /^Date\/Time:\s+(.+)/;
+
+export function extractCrashDate(crashFilePath: string): Date | null {
+  try {
+    const content = fs.readFileSync(crashFilePath, "utf-8");
+    const lines = content.split("\n").slice(0, 120);
+    for (const line of lines) {
+      const match = DATE_TIME_REGEX.exec(line);
+      if (match) {
+        const parsed = new Date(match[1].trim());
+        if (!isNaN(parsed.getTime())) {
+          return parsed;
+        }
+      }
+    }
+  } catch {
+    // ignore read errors
+  }
+  return null;
+}
+
+export function extractVersion(crashFilePath: string): string {
+  try {
+    const content = fs.readFileSync(crashFilePath, "utf-8");
+    const lines = content.split("\n").slice(0, 120);
+    for (const line of lines) {
+      const match = VERSION_REGEX.exec(line);
+      if (match) {
+        const raw = match[1].trim();
+        const parenIdx = raw.indexOf(" (");
+        return parenIdx !== -1 ? raw.slice(0, parenIdx) : raw;
+      }
+    }
+  } catch {
+    // ignore read errors
+  }
+  return "";
+}
+
+export function detectCrashSource(filepath: string): string {
+  const lower = filepath.toLowerCase();
+  if (lower.includes("xccrashpoint") || lower.includes("xcode") || lower.includes("xcodecrashlogs")) {
+    return "xcode-organizer";
+  }
+  if (lower.includes("apptics")) {
+    return "apptics";
+  }
+  if (filepath.endsWith(".ips")) {
+    return "ips-file";
+  }
+  return "manual";
+}
+
+export function findCrashLogs(xccrashpointPath: string): string[] {
+  const results: string[] = [];
+
+  // Try DistributionInfos/all/logs/ first
+  const primaryDir = path.join(xccrashpointPath, "DistributionInfos", "all", "logs");
+  if (fs.existsSync(primaryDir)) {
+    _findCrashFiles(primaryDir, results);
+    if (results.length > 0) return results;
+  }
+
+  // Try Contents/Logs/
+  const contentsDir = path.join(xccrashpointPath, "Contents", "Logs");
+  if (fs.existsSync(contentsDir)) {
+    _findCrashFiles(contentsDir, results);
+    if (results.length > 0) return results;
+  }
+
+  // Fallback: recursive search
+  _findCrashFiles(xccrashpointPath, results);
+  return results;
+}
+
+function _findCrashFiles(dir: string, results: string[]): void {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        _findCrashFiles(fullPath, results);
+      } else if (entry.isFile() && (entry.name.endsWith(".crash") || entry.name.endsWith(".ips"))) {
+        results.push(fullPath);
+      }
+    }
+  } catch {
+    // ignore permission errors
+  }
+}
+
+function _findXccrashpoints(dir: string, recursive: boolean): string[] {
+  const results: string[] = [];
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name.endsWith(".xccrashpoint")) {
+          results.push(fullPath);
+        } else if (recursive) {
+          results.push(..._findXccrashpoints(fullPath, recursive));
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return results;
+}
+
+export function exportCrashLogs(
+  inputDir: string,
+  outputDir: string,
+  versions: string[] = [],
+  recursive = false,
+  dryRun = false,
+  startDate?: string,
+  endDate?: string,
+  manifest?: ProcessedManifest
+): ExportResult {
+  if (startDate !== undefined) {
+    validateDateInput(startDate, "--start-date");
+  }
+  if (endDate !== undefined) {
+    validateDateInput(endDate, "--end-date");
+  }
+  const result: ExportResult = { exported: 0, skipped: 0, errors: [], files: [] };
+  if (dryRun) {
+    result.canBeExported = 0;
+  }
+
+  if (!fs.existsSync(inputDir)) {
+    result.errors.push(`Input directory does not exist: ${inputDir}`);
+    return result;
+  }
+
+  if (!dryRun) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const xccrashpoints = _findXccrashpoints(inputDir, recursive);
+  let counter = 1;
+
+  for (const xcp of xccrashpoints) {
+    const crashes = findCrashLogs(xcp);
+    for (const crashPath of crashes) {
+      const fileVersion = extractVersion(crashPath);
+
+      // Manifest check — skip if already processed (keyed by Incident Identifier or path)
+      const incidentId = extractIncidentId(crashPath);
+      const manifestKey = incidentId ?? crashPath;
+      if (manifest && manifest.isProcessed(manifestKey)) {
+        result.skipped++;
+        result.files.push({
+          source: crashPath,
+          destination: "",
+          version: fileVersion,
+          skipped: true,
+          reason: "already processed",
+        });
+        continue;
+      }
+
+      // Version filter — match on full version string or short version (before build number in parens)
+      if (versions.length > 0 && fileVersion) {
+        const parenIndex = fileVersion.indexOf(" (");
+        const shortVersion = parenIndex !== -1 ? fileVersion.slice(0, parenIndex) : fileVersion;
+        if (!versions.some((v) => v === fileVersion || v === shortVersion)) {
+          result.skipped++;
+          result.files.push({
+            source: crashPath,
+            destination: "",
+            version: fileVersion,
+            skipped: true,
+            reason: "version filtered",
+          });
+          continue;
+        }
+      }
+
+      // Date filter
+      if (startDate !== undefined || endDate !== undefined) {
+        const crashDate = extractCrashDate(crashPath);
+        if (crashDate !== null) {
+          if (startDate !== undefined) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            if (crashDate < start) {
+              result.skipped++;
+              result.files.push({
+                source: crashPath,
+                destination: "",
+                version: fileVersion,
+                skipped: true,
+                reason: "date filtered (before startDate)",
+              });
+              continue;
+            }
+          }
+          if (endDate !== undefined) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            if (crashDate > end) {
+              result.skipped++;
+              result.files.push({
+                source: crashPath,
+                destination: "",
+                version: fileVersion,
+                skipped: true,
+                reason: "date filtered (after endDate)",
+              });
+              continue;
+            }
+          }
+        }
+      }
+
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      let destName = `xcodeCrashLog${counter}_${dateStr}.crash`;
+      let destPath = path.join(outputDir, destName);
+
+      // Handle collisions
+      if (!dryRun) {
+        const suffixes = ["", "b", "c", "d", "e", "f", "g", "h"];
+        for (const suffix of suffixes) {
+          const candidate = `xcodeCrashLog${counter}_${dateStr}${suffix}.crash`;
+          destPath = path.join(outputDir, candidate);
+          destName = candidate;
+          if (!fs.existsSync(destPath)) break;
+        }
+      }
+
+      const entry: ExportEntry = {
+        source: crashPath,
+        destination: destPath,
+        version: fileVersion,
+        skipped: false,
+      };
+
+      if (!dryRun) {
+        try {
+          fs.copyFileSync(crashPath, destPath);
+          result.exported++;
+          counter++;
+          manifest?.markProcessed(manifestKey);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          result.errors.push(`Failed to copy ${crashPath}: ${msg}`);
+          entry.skipped = true;
+          entry.reason = msg;
+          result.skipped++;
+        }
+      } else {
+        result.canBeExported = (result.canBeExported ?? 0) + 1;
+        counter++;
+      }
+
+      result.files.push(entry);
+    }
+  }
+
+  return result;
+}
